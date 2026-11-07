@@ -26,6 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Normalize script permissions
+        run: |
+          chmod +x AirSend-macOS/build.sh
+          chmod +x AirSend-macOS/script/make_appcast.sh
+          chmod +x build_magisk_payload.sh
+          chmod +x magisk_module/service.sh
+          chmod +x tools/prepare_release_assets.sh
+          chmod +x tools/test_prepare_release_assets.sh
+          chmod +x tools/test_magisk_service_version_guard.sh
+          chmod +x tools/test_airsend_version_alignment.sh
+          chmod +x tools/test_airsend_parity_matrix.sh
+
       - name: Parse workflow YAML
         run: |
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'workflow yaml parsed'"
