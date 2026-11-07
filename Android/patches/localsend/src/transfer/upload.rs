@@ -39,6 +39,7 @@ pub struct IncomingTransferOffer {
 }
 
 #[async_trait::async_trait]
+#[allow(unused_attributes)]
 pub trait IncomingTransferHandler: Send + Sync {
     async fn authorize(
         &self,
