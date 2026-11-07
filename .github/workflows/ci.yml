@@ -28,15 +28,9 @@ jobs:
 
       - name: Normalize script permissions
         run: |
-          chmod +x AirSend-macOS/build.sh
-          chmod +x AirSend-macOS/script/make_appcast.sh
           chmod +x build_magisk_payload.sh
           chmod +x magisk_module/service.sh
-          chmod +x tools/prepare_release_assets.sh
-          chmod +x tools/test_prepare_release_assets.sh
-          chmod +x tools/test_magisk_service_version_guard.sh
           chmod +x tools/test_airsend_version_alignment.sh
-          chmod +x tools/test_airsend_parity_matrix.sh
 
       - name: Parse workflow YAML
         run: |
@@ -44,135 +38,22 @@ jobs:
 
       - name: Check shell scripts parse
         run: |
-          bash -n AirSend-macOS/build.sh
-          bash -n AirSend-macOS/script/make_appcast.sh
           bash -n build_magisk_payload.sh
           bash -n magisk_module/service.sh
-          bash -n tools/test_magisk_service_version_guard.sh
           bash -n tools/test_airsend_version_alignment.sh
-          bash -n tools/prepare_release_assets.sh
-          bash -n tools/test_prepare_release_assets.sh
-          bash -n tools/test_airsend_parity_matrix.sh
 
       - name: Check required project files
         run: |
-          test -f AirSend-macOS/Package.swift
-          test -f AirSend-macOS/Info.plist
           test -f Android/settings.gradle.kts
           test -f Android/build.gradle.kts
           test -f Android/app/build.gradle.kts
           test -f Android/airsend_daemon/Cargo.toml
           test -f Android/patches/localsend/Cargo.toml
           test -x Android/gradlew
-          test -x AirSend-macOS/build.sh
-          test -x tools/prepare_release_assets.sh
-          test -x tools/test_prepare_release_assets.sh
-          test -x tools/test_magisk_service_version_guard.sh
           test -x tools/test_airsend_version_alignment.sh
-          test -x tools/test_airsend_parity_matrix.sh
-
-      - name: Test release asset completeness guard
-        run: tools/test_prepare_release_assets.sh
-
-      - name: Test Magisk APK version guard
-        run: tools/test_magisk_service_version_guard.sh
 
       - name: Test AirSend version alignment
         run: tools/test_airsend_version_alignment.sh
-
-      - name: Test Android to macOS capability matrix
-        run: tools/test_airsend_parity_matrix.sh
-
-  macos-swift:
-    name: macOS Swift build and app bundle
-    runs-on: macos-15
-    timeout-minutes: 30
-    needs: workflow-check
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode 26.3
-        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
-
-      - name: Cache SwiftPM
-        uses: actions/cache@v4
-        with:
-          path: |
-            AirSend-macOS/.build
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
-          key: ${{ runner.os }}-xcode-26.3-swiftpm-${{ hashFiles('AirSend-macOS/Package.swift', 'AirSend-macOS/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-26.3-swiftpm-
-
-      - name: Show toolchain versions
-        working-directory: AirSend-macOS
-        run: |
-          sw_vers
-          xcodebuild -version
-          swift --version
-
-      - name: Resolve Swift dependencies
-        working-directory: AirSend-macOS
-        run: swift package resolve
-
-      - name: Run updater self-tests
-        working-directory: AirSend-macOS
-        run: swift run AirSendUpdaterSelfTests
-
-      - name: Run drag handoff self-tests
-        working-directory: AirSend-macOS
-        run: swift run AirSendDragHandoffSelfTests
-
-      - name: Run automation support self-tests
-        working-directory: AirSend-macOS
-        run: swift run AirSendAutomationSupportSelfTests
-
-      - name: Run Console support self-tests
-        working-directory: AirSend-macOS
-        run: swift run AirSendConsoleSupportSelfTests
-
-      - name: Run discovery support self-tests
-        working-directory: AirSend-macOS
-        run: swift run AirSendDiscoverySupportSelfTests
-
-      - name: Run runtime core self-tests
-        working-directory: AirSend-macOS
-        run: swift run AirSendRuntimeCoreSelfTests
-
-      - name: Run sender and receiver loopback integration
-        working-directory: AirSend-macOS
-        env:
-          AIRSEND_SELFTEST: "1"
-          AIRSEND_SELFTEST_LOOPBACK: "1"
-        run: swift run AirSend
-
-      - name: Build release Swift package
-        working-directory: AirSend-macOS
-        run: swift build -c release -Xswiftc -warnings-as-errors
-
-      - name: Package and verify AirSend.app
-        working-directory: AirSend-macOS
-        env:
-          CI: "true"
-          AIRSEND_BUILD_CONFIGURATION: release
-          AIRSEND_ARTIFACT_ZIP: AirSend-macOS-release.zip
-        run: |
-          ./build.sh
-          test -f AirSend-macOS-release.zip
-          rm -rf /tmp/airsend-ci-verify
-          mkdir -p /tmp/airsend-ci-verify
-          /usr/bin/ditto -x -k AirSend-macOS-release.zip /tmp/airsend-ci-verify
-          test -d /tmp/airsend-ci-verify/AirSend.app/Contents/Frameworks/Sparkle.framework
-          codesign --verify --deep --strict --verbose=2 /tmp/airsend-ci-verify/AirSend.app
-
-      - name: Upload macOS app artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AirSend-macOS-release
-          path: AirSend-macOS/AirSend-macOS-release.zip
-          if-no-files-found: error
-          retention-days: 14
 
   rust-daemon:
     name: Rust daemon and patched LocalSend

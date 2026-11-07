@@ -15,7 +15,7 @@
             <Button Content="选择文件并发送" Width="140" Height="32" Margin="10,0,0,0" Click="Send_Click" />
             <TextBlock x:Name="StatusText" Margin="14,7,0,0" Foreground="#666" />
         </StackPanel>
-        <ListView x:Name="DeviceList" Grid.Row="2" ItemsSource="Devices" BorderBrush="#DDD" SelectionMode="Single">
+        <ListView x:Name="DeviceList" Grid.Row="2" ItemsSource="{Binding Devices}" BorderBrush="#DDD" SelectionMode="Single">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="设备名称" Width="230" DisplayMemberBinding="{Binding Name}" />

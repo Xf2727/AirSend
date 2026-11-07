@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private readonly DispatcherTimer _clipboardTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private uint _clipboardSequence;
+    private int _clipboardSyncInProgress;
     [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
     public ObservableCollection<DiscoveredDevice> Devices { get; } = new();
 
@@ -91,7 +92,8 @@ public partial class MainWindow : Window
 
     private async void ClipboardTimer_Tick(object? sender, EventArgs e)
     {
-        if (Devices.Count == 0 || ClipboardSyncGuard.ConsumeSuppression()) return;
+        if (Devices.Count == 0 || ClipboardSyncGuard.ConsumeSuppression() || Interlocked.Exchange(ref _clipboardSyncInProgress, 1) == 1) return;
+        string? temp = null;
         try
         {
             var sequence = GetClipboardSequenceNumber();
@@ -99,7 +101,7 @@ public partial class MainWindow : Window
             _clipboardSequence = sequence;
             var data = Clipboard.GetDataObject();
             if (data is null) return;
-            var temp = Path.Combine(Path.GetTempPath(), $"airsend-clipboard-{Guid.NewGuid():N}");
+            temp = Path.Combine(Path.GetTempPath(), $"airsend-clipboard-{Guid.NewGuid():N}");
             if (data.GetDataPresent(DataFormats.Bitmap) && data.GetData(DataFormats.Bitmap) is BitmapSource bitmap)
             {
                 temp = Path.Combine(Path.GetTempPath(), $"AirSend-Clipboard-{Guid.NewGuid():N}.png");
@@ -119,9 +121,18 @@ public partial class MainWindow : Window
                 await _transferService.SendAsync(DeviceList.SelectedItem as DiscoveredDevice ?? Devices[0], temp, CancellationToken.None);
                 DetailText.Text = "文字剪贴板已发送";
             }
-            if (File.Exists(temp)) File.Delete(temp);
         }
         catch (Exception ex) { DetailText.Text = $"剪贴板同步失败：{ex.Message}"; }
+        finally
+        {
+            if (temp is not null)
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            Interlocked.Exchange(ref _clipboardSyncInProgress, 0);
+        }
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await DiscoverAsync();
