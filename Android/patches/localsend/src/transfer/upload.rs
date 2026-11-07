@@ -39,7 +39,7 @@ pub struct IncomingTransferOffer {
 }
 
 #[async_trait::async_trait]
-#[allow(unused_attributes)]
+#[allow(clippy::double_must_use)]
 pub trait IncomingTransferHandler: Send + Sync {
     async fn authorize(
         &self,
