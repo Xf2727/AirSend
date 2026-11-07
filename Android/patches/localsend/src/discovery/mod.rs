@@ -27,8 +27,10 @@ impl Client {
             self.maybe_pin_peer_neighbor(src.ip(), device.mac_address.as_deref())
                 .await;
 
-            let mut peers = self.peers.lock().await;
-            remember_peer_entry(&mut peers, src, device.clone());
+            {
+                let mut peers = self.peers.lock().await;
+                remember_peer_entry(&mut peers, src, device.clone());
+            }
 
             if device.announce != Some(true) {
                 return;
@@ -36,13 +38,13 @@ impl Client {
 
             // Announce in return upon receiving a valid device message and it wants announcements
             if let Err(e) = self.announce_multicast().await {
-                eprintln!("Error during multicast announcement: {}", e);
+                tracing::warn!("Error during multicast announcement: {}", e);
             }
             if let Err(e) = self.announce_http(Some(src), &device.protocol).await {
-                eprintln!("Error during HTTP announcement: {}", e);
+                tracing::warn!("Error during HTTP announcement: {}", e);
             };
         } else {
-            eprintln!("Received invalid message: {}", message);
+            tracing::warn!("Received invalid message: {}", message);
         }
     }
 }

@@ -1,13 +1,26 @@
+use std::net::SocketAddr;
 use std::time::Duration;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::sync::Mutex;
 
 use axum::{
     extract::{ConnectInfo, State},
     Extension, Json,
 };
 
-use crate::{models::device::DeviceInfo, ports::TRANSFER_PORT, remember_peer_entry, Client};
+use crate::{
+    models::device::DeviceInfo, ports::TRANSFER_PORT, remember_peer_entry, Client, PeerMap,
+};
+
+const MAC_TRANSFER_PORT: u16 = 53318;
+
+fn announcement_port_candidates(advertised_port: u16) -> Vec<u16> {
+    let mut ports = vec![advertised_port];
+    for port in [MAC_TRANSFER_PORT, TRANSFER_PORT] {
+        if !ports.contains(&port) {
+            ports.push(port);
+        }
+    }
+    ports
+}
 
 impl Client {
     pub async fn announce_http(
@@ -16,19 +29,38 @@ impl Client {
         protocol: &str,
     ) -> crate::error::Result<()> {
         if let Some(ip) = ip {
-            let url = format!("{}://{}/api/localsend/v2/register", protocol, ip);
-            // Discovery 流量不应与真正的传输复用长连接，否则换网后会把
-            // /register、/prepare-upload、/upload 串在同一条 keep-alive 通道上，
-            // 导致 30s 级别的队头阻塞。
-            let response = self
-                .http_client
-                .post(&url)
-                .header("Connection", "close")
-                .timeout(Duration::from_secs(1))
-                .json(&self.device)
-                .send()
-                .await?;
-            let _ = response.bytes().await?;
+            let mut last_error = None;
+            for port in announcement_port_candidates(ip.port()) {
+                let candidate = SocketAddr::new(ip.ip(), port);
+                let url = format!("{}://{}/api/localsend/v2/register", protocol, candidate);
+                // Discovery 流量不应与真正的传输复用长连接，否则换网后会把
+                // /register、/prepare-upload、/upload 串在同一条 keep-alive 通道上。
+                let response = self
+                    .http_client
+                    .post(&url)
+                    .header("Connection", "close")
+                    .timeout(Duration::from_secs(1))
+                    .json(&self.device)
+                    .send()
+                    .await
+                    .and_then(reqwest::Response::error_for_status);
+                let response = match response {
+                    Ok(response) => response,
+                    Err(error) => {
+                        last_error = Some(error);
+                        continue;
+                    }
+                };
+                let remote = response.json::<DeviceInfo>().await?;
+                let mut remote_addr = candidate;
+                remote_addr.set_port(remote.port);
+                let mut peers = self.peers.lock().await;
+                remember_peer_entry(&mut peers, remote_addr, remote);
+                return Ok(());
+            }
+            if let Some(error) = last_error {
+                return Err(error.into());
+            }
         }
         Ok(())
     }
@@ -56,7 +88,7 @@ impl Client {
 }
 
 pub async fn register_device(
-    State(peers): State<Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>>,
+    State(peers): State<PeerMap>,
     Extension(client): Extension<DeviceInfo>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(device): Json<DeviceInfo>,
@@ -66,4 +98,19 @@ pub async fn register_device(
     let mut peers = peers.lock().await;
     remember_peer_entry(&mut peers, addr, device.clone());
     Json(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::announcement_port_candidates;
+
+    #[test]
+    fn announcement_fallback_covers_mac_and_android_transfer_ports() {
+        assert_eq!(announcement_port_candidates(53319), vec![53319, 53318]);
+        assert_eq!(announcement_port_candidates(53318), vec![53318, 53319]);
+        assert_eq!(
+            announcement_port_candidates(53317),
+            vec![53317, 53318, 53319]
+        );
+    }
 }

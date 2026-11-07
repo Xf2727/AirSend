@@ -23,7 +23,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     discovery::http::register_device,
-    transfer::upload::{register_prepare_upload, register_upload},
+    transfer::upload::{register_cancel, register_prepare_upload, register_upload},
     Client,
 };
 
@@ -76,7 +76,7 @@ impl Client {
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
 
         let listener = TcpListener::bind(&addr).await?;
-        println!("HTTP server listening on {}", addr);
+        tracing::info!("HTTP server listening on {}", addr);
 
         axum::serve(
             listener,
@@ -93,7 +93,7 @@ impl Client {
         let acceptor = TlsAcceptor::from(tls_config);
         let mut make_service = app.into_make_service_with_connect_info::<SocketAddr>();
 
-        println!("HTTPS server listening on {}", addr);
+        tracing::info!("HTTPS server listening on {}", addr);
 
         loop {
             let (tcp_stream, remote_addr) = listener.accept().await?;
@@ -113,7 +113,7 @@ impl Client {
                 let tls_stream = match acceptor.accept(tcp_stream).await {
                     Ok(stream) => stream,
                     Err(err) => {
-                        eprintln!("TLS handshake error from {}: {}", remote_addr, err);
+                        tracing::warn!("TLS handshake error from {}: {}", remote_addr, err);
                         return;
                     }
                 };
@@ -125,7 +125,7 @@ impl Client {
                     .serve_connection_with_upgrades(io, hyper_service)
                     .await
                 {
-                    eprintln!("HTTPS connection error from {}: {}", remote_addr, err);
+                    tracing::warn!("HTTPS connection error from {}: {}", remote_addr, err);
                 }
             });
         }
@@ -149,11 +149,13 @@ impl Client {
                 post(register_prepare_upload),
             )
             .route("/api/localsend/v2/upload", post(register_upload))
+            .route("/api/localsend/v2/cancel", post(register_cancel))
             .layer(DefaultBodyLimit::disable())
             .layer(RequestBodyLimitLayer::new(1024 * 1024 * 1024))
             .layer(Extension(self.device.clone()))
             .layer(Extension(self.sessions.clone()))
             .layer(Extension(self.download_dir.clone()))
+            .layer(Extension(self.incoming_handler.clone()))
             .with_state(peers)
     }
 }

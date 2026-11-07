@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::SystemTime;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +35,7 @@ impl FileMetadata {
             return Err(LocalSendError::NotAFile);
         }
 
-        let id = path.to_str().unwrap().to_string();
+        let id = Uuid::new_v4().to_string();
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let size = metadata.len();
 
@@ -46,8 +47,8 @@ impl FileMetadata {
         let sha256 = Some(sha256::try_digest(path)?);
 
         let metadata = Some(FileMetadataExt {
-            modified: metadata.modified().ok().map(|t| format_datetime(t)),
-            accessed: metadata.accessed().ok().map(|t| format_datetime(t)),
+            modified: metadata.modified().ok().map(format_datetime),
+            accessed: metadata.accessed().ok().map(format_datetime),
         });
 
         Ok(FileMetadata {

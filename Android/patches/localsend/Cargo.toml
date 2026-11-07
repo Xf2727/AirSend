@@ -43,6 +43,9 @@ version = "0.22.1"
 [dependencies.axum-macros]
 version = "0.4.2"
 
+[dependencies.async-trait]
+version = "0.1"
+
 [dependencies.chrono]
 version = "0.4.39"
 
@@ -75,7 +78,13 @@ version = "0.7.0"
 
 [dependencies.reqwest]
 version = "0.12.9"
-features = ["json"]
+features = [
+    "json",
+    "stream",
+]
+
+[dependencies.futures-util]
+version = "0.3"
 
 [dependencies.socket2]
 version = "0.6.2"
