@@ -3,6 +3,14 @@ name = "airsend_daemon"
 version = "5.0.2"
 edition = "2021"
 
+[lib]
+path = "src/main.rs"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "airsend_daemon"
+path = "src/main.rs"
+
 [dependencies]
 # 🔋 精简 tokio features（原 "full"）
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "fs", "time", "sync", "macros"] }

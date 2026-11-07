@@ -136,8 +136,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
         run: |
           cargo ndk -t aarch64-linux-android -o /tmp/airsend-daemon build --release --locked
-          test -x /tmp/airsend-daemon/arm64-v8a/airsend_daemon
-          cp /tmp/airsend-daemon/arm64-v8a/airsend_daemon ../app/src/main/assets/airsend_daemon
+          test -f /tmp/airsend-daemon/arm64-v8a/libairsend_daemon.so
+          cp /tmp/airsend-daemon/arm64-v8a/libairsend_daemon.so ../app/src/main/assets/airsend_daemon
           chmod +x ../app/src/main/assets/airsend_daemon
 
       - name: Upload Android Rust daemon
