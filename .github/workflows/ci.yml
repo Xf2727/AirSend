@@ -110,8 +110,6 @@ jobs:
       - name: Set up Android SDK and NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: ndk;27.2.12479018
-        with:
           ndk-version: 27.2.12479018
 
       - name: Install Rust Android target and cargo-ndk
