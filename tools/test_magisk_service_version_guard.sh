@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export AIRSEND_SERVICE_TEST_MODE=1
 export AIRSEND_TEST_MODDIR="$ROOT_DIR/magisk_module"
+export AIRSEND_TEST_LOG_DIR="${TMPDIR:-/tmp}/airsend-service-test"
 
 # shellcheck disable=SC1091
 source "$ROOT_DIR/magisk_module/service.sh"

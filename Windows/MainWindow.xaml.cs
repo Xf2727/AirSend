@@ -103,10 +103,12 @@ public partial class MainWindow : Window
             if (data.GetDataPresent(DataFormats.Bitmap) && data.GetData(DataFormats.Bitmap) is BitmapSource bitmap)
             {
                 temp = Path.Combine(Path.GetTempPath(), $"AirSend-Clipboard-{Guid.NewGuid():N}.png");
-                using var output = File.Create(temp);
-                var encoder = new PngBitmapEncoder();
-                encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                encoder.Save(output);
+                using (var output = File.Create(temp))
+                {
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                    encoder.Save(output);
+                }
                 await _transferService.SendAsync(DeviceList.SelectedItem as DiscoveredDevice ?? Devices[0], temp, CancellationToken.None);
                 DetailText.Text = "图片剪贴板已发送";
             }
@@ -159,14 +161,14 @@ public partial class MainWindow : Window
                 var result = await receive;
                 var json = JsonDocument.Parse(result.Buffer).RootElement;
                 if (!json.TryGetProperty("alias", out var alias)) continue;
-                var port = json.TryGetProperty("port", out var portValue) ? portValue.GetInt32() : 53318;
+                var port = json.TryGetProperty("port", out var portValue) && portValue.TryGetInt32(out var advertisedPort) ? advertisedPort : 53318;
                 var protocol = json.TryGetProperty("protocol", out var protocolValue) && protocolValue.GetString() is { Length: > 0 } advertisedProtocol
                     ? advertisedProtocol.ToLowerInvariant() : "https";
                 if (protocol is not ("http" or "https")) protocol = "https";
                 var device = new DiscoveredDevice(alias.GetString() ?? "Unknown", result.RemoteEndPoint.Address.ToString(), port, protocol);
                 if (!Devices.Any(existing => existing.Address == device.Address)) Devices.Add(device);
             }
-            catch (JsonException) { }
+            catch (Exception) { }
         }
         client.Close();
         StatusText.Text = $"找到 {Devices.Count} 台设备";
