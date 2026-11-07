@@ -21,35 +21,38 @@
   <a href="README_en.md">English</a> | <b>简体中文</b>
 </p>
 
+<p align="center">
+  <a href="SPONSOR.md">❤️ 支持 AirSend</a>
+</p>
+
 <h2 align="center">🤔 这是什么？</h2>
 
-AirSend 是一套专为 **Mac + Android** 用户设计的跨平台互联工具，核心目标是：**让文件传输和剪贴板同步像 AirDrop 一样顺手，而不需要两台 Apple 设备。**
+AirSend 是一套面向 **Windows/macOS + Android** 用户设计的跨平台互联工具，核心目标是：**让文件传输和剪贴板同步像 AirDrop 一样顺手，而不需要两台 Apple 设备。**
 
 它由两部分组成：
 - **macOS 端**：一个用 Swift 原生开发的菜单栏应用，内存占用约 20MB，没有主窗口，拖拽即发
 - **Android 端**：按需选择——可以直接用官方 LocalSend，也可以安装 AirSend 定制 App 获得系统级深度集成
+- **Windows 端**：.NET 8 桌面客户端，支持 LocalSend 文件收发、剪贴板同步、托盘常驻和开机启动
 
 > **网络要求**：两台设备需在同一 Wi-Fi 局域网下，路由器未开启 AP 隔离。默认仍优先使用 HTTPS；如果你所在的是“能发现但几乎传不动”的校园网/宿舍网，请看下文的 `HTTP 兼容模式`。
 
 ---
 
-<h2 align="center"> ⚖️ 和官方 LocalSend 的区别 </h2>
+<h2 align="center"> ⚖️ 和同类软件的区别 </h2>
 
 <div align="center">
 
-| 对比项           | 官方 LocalSend       | AirSend                          |
-| ---------------- | -------------------- | -------------------------------- |
-| macOS 界面       | Flutter 跨平台主窗口 | 纯 Swift 原生菜单栏，无主窗口    |
-| 内存占用         | ~300MB               | **~20MB**                        |
-| 剪贴板同步       | ❌                    | ✅ 双向自动（Android ↔ Mac）      |
-| 截图自动推送     | ❌                    | ✅ 截图秒到 Mac 下载目录          |
-| 图片剪贴板同步   | ❌                    | ✅ Mac 复制图片自动发到 Android   |
-| Android 后台保活 | 依赖系统进程管理     | Rust 守护进程，脱离 App 生命周期 |
-| 系统级剪贴板访问 | ❌                    | ✅（需 Root + LSPosed）           |
-| 校园网兼容路径   | ❌ 无手动 HTTP 兼容链路 | ✅ 手动 HTTP 兼容模式（默认关闭） |
-| 大网段校园网发现 | ❌ 多播失效时容易直接失联 | ✅ `/24` 扩散探测 + 已知设备回找保活 |
-| 复杂拖拽体验     | 常规主窗口拖放       | ✅ DropZone 预热、防弹回、后台最小化 |
-| 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 完全兼容 LocalSend 协议        |
+| 对比项           | 官方 LocalSend       | KDE Connect              | 官方 AirDrop            | AirSend                          |
+| ---------------- | -------------------- | ------------------------ | ----------------------- | -------------------------------- |
+| macOS 界面       | ✅ Flutter 跨平台主窗口 | ✅ 菜单栏 / 配对管理工具 | ✅ 系统原生分享入口     | ✅ 纯 Swift 原生菜单栏，无主窗口 |
+| 内存占用         | ~300MB               | 中等，常驻后台组件       | ✅ 系统内建能力，无独立主窗 | ✅ **~20MB**                     |
+| 剪贴板同步       | ❌                    | ✅ 手动 / 插件式同步      | ✅ Apple 设备间通用剪贴板 | ✅ 双向自动（Android ↔ Mac）      |
+| 截图自动推送     | ❌                    | ❌                        | ❌                       | ✅ 截图秒到 Mac 下载目录          |
+| 图片剪贴板同步   | ❌                    | ❌                        | ✅ Apple 生态内通用剪贴板 | ✅ Mac 复制图片自动发到 Android   |
+| Android 后台保活 | 依赖系统进程管理     | 依赖 Android 后台策略    | ❌ 不支持 Android        | Rust 守护进程，脱离 App 生命周期 |
+| 系统级剪贴板访问 | ❌                    | ❌                        | ❌ 不支持 Android        | ✅（需 Root + LSPosed）           |
+| 复杂拖拽体验     | ❌                    | ❌                        | ❌                       | ✅ 弹窗拖拽发送                    |
+| 协议兼容性       | ✅ LocalSend 标准协议 | ✅ 独立协议生态          | ✅ Apple 生态原生能力    | ✅ 完全兼容 LocalSend 协议        |
 
 </div>
 
@@ -113,7 +116,7 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 | 平台                    | 要求                                                |
 | ----------------------- | --------------------------------------------------- |
-| macOS                   | macOS 13 Ventura 及以上                             |
+| macOS                   | macOS 15 Sequoia 及以上                             |
 | Android（基础文件传输） | Android 8.0+，安装官方 LocalSend 即可               |
 | Android（完整功能）     | Root 权限 + Magisk 或 KernelSU + LSPosed            |
 | 网络                    | 两端设备处于同一 Wi-Fi 局域网，路由器未开启 AP 隔离 |
@@ -123,125 +126,44 @@ AirSend 3.0.0 新增了一个**默认关闭、需手动开启**的 `HTTP 兼容�
 
 ---
 
+<h2 align="center">✨ AirSend 5.0：跨端重塑</h2>
+
+<p align="center"><b>Android 液态玻璃 × Material 3 · 原生 macOS 玻璃控制台</b></p>
+
+
+
+<p align="center"><sub>Android 控制台：状态、设备、传输活动与可深度定制的 Material 主题</sub></p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-pink.jpg" width="100%" alt="AirSend Android 粉红主题">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-green.jpg" width="100%" alt="AirSend Android 墨绿主题">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-android-purple.jpg" width="100%" alt="AirSend Android 深紫主题">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/v5.0/airsend-v5-macos-console.jpg" width="100%" alt="AirSend 5.0 native macOS glass console">
+</p>
+
+
+<p align="center"><sub>macOS 原生玻璃控制台：设备、传输、自动化与完整运行设置</sub></p>
+
+
+
+---
+
 <h2 align="center">🕸️ 架构总览</h2>
 
-下图展示了 macOS 端和 Android 端各模块的分工以及通信链路。
+下图面向开发者展示 AirSend 的底层工程架构，包括进程边界、技术栈、IPC、LocalSend-compatible API 适配层以及复杂网络恢复路径。
 
-```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'background': 'transparent', 'clusterBkg': '#0d0d0d55', 'edgeLabelBackground': '#1a1a2e', 'fontSize': '16px'}}}%%
-flowchart TB
-    classDef mac_node fill:#1d1d1f,stroke:#007aff,stroke-width:2px,color:#fff
-    classDef android_node fill:#0d231e,stroke:#3ddc84,stroke-width:2px,color:#fff
-    classDef daemon_node fill:#2b1a13,stroke:#f86523,stroke-width:2px,color:#fff
-    classDef magic_node fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff
-    classDef protocol_line color:#eab308,stroke-width:3px,stroke-dasharray: 5 5
-
-    %% ==========================================
-    %% 第一部分：macOS 端
-    %% ==========================================
-    subgraph macOS_Side ["💻 macOS 端 (极致原生的接发枢纽)"]
-        direction TB
-
-        subgraph Mac_App ["应用调度层 - AppDelegate @MainActor"]
-            AppCore["菜单栏图标 / 设备注册表 / 锐入锁"]:::mac_node
-            DragDetect["拖拽监控 / DropZoneWindow / 1s空闲-0.1s激活 / 60px边界兑底"]:::mac_node
-            AppCore --- DragDetect
-        end
-
-        subgraph Mac_Security ["安全层"]
-            CertMgr["证书管理器 / 自签 X.509 / TLS 指纹身份"]:::mac_node
-            UpdateSvc["更新服务 / GitHub API / 自动检查新版本"]:::mac_node
-        end
-
-        subgraph Mac_Network ["Network.framework - 双引擎"]
-            UDP_Disc["UDPDiscoveryService / 端口 53317 / 局域网广播 / `/24` 扩散探测 / 已知设备回找"]:::mac_node
-            HTTP_Trans["HTTPTransferServer / HTTPS 默认 + HTTP 兼容 / 端口 53318 / 独立连接队列"]:::mac_node
-            CertMgr -->|"注入 TLS 身份"| HTTP_Trans
-        end
-
-        subgraph Mac_Send ["发送引擎"]
-            FileSender["文件发送器 / HTTPS 默认 / HTTP 兼容预检 / 小 payload fallback"]:::mac_node
-            ClipSender["剪贴板发送器 / 文字为 clipboard.txt / 图片为 PNG / 兼容模式支持"]:::mac_node
-        end
-
-        subgraph Mac_Clipboard ["剪贴板引擎"]
-            ClipSvc["剪贴板服务 3s 轮询 / TIFF-PNG 优先 / changeCount 防回声"]:::mac_node
-            Mac_Clip["macOS 剪贴板 / NSPasteboard"]:::mac_node
-            ClipSvc <-->|"读取 / 写入 + 防回声"| Mac_Clip
-        end
-
-        AppCore -->|"调度"| UDP_Disc
-        AppCore -->|"调度"| HTTP_Trans
-        DragDetect -->|"拖拽落下"| FileSender
-        ClipSvc -->|"文字变化"| ClipSender
-        ClipSvc -->|"图片变化"| ClipSender
-        HTTP_Trans -->|"接收文字并写入"| Mac_Clip
-        HTTP_Trans -->|"流式落盘 / 冲突重命名"| AppCore
-    end
-
-    %% ==========================================
-    %% 第二部分：Android 端
-    %% ==========================================
-    subgraph Android_Side ["🤖 Android 端 (击穿系统的全景视界)"]
-        direction TB
-
-        subgraph App_Layer ["App 层 - Kotlin"]
-            BootRcv["开机自启接收器 / BootReceiver"]:::android_node
-            ForegroundSvc["AirSendService / 前台服务 / dataSync / START-STICKY"]:::android_node
-            ShortcutMgr["快捷方式管理器 / 动态分享菜单注入"]:::android_node
-            ShareTarget["分享目标 Activity / 静默入口"]:::android_node
-            BootRcv --> ForegroundSvc
-            ForegroundSvc --> ShortcutMgr
-        end
-
-        subgraph Magisk_Modules ["Xposed 层 - 运行于 system-server 进程"]
-            LSPosedHook{"ClipboardHook / Hook: ClipboardService.ClipboardImpl"}:::magic_node
-            AntiLoop["防死循环锁 / isWritingFromSync volatile / 500ms 延迟"]:::magic_node
-            GodMode["上帝模式 IPC 服务器 / LocalServerSocket @airsend-app-ipc"]:::magic_node
-            SystemClip["SystemClipboard / ClipboardManagerService - UID 1000 绕过焦点限制"]:::magic_node
-            LSPosedHook --> AntiLoop
-            AntiLoop <-->|"监听 / 强写"| SystemClip
-            GodMode -->|"通过 ActivityThread 上下文强写"| SystemClip
-        end
-
-        subgraph Rust_Daemon ["Rust 守护进程 - arm64-v8a - Magisk 模块"]
-            inotify["inotify / notify crate / EXT4 Close-Write 和 Rename 事件 / 1s 刚度延迟"]:::daemon_node
-            TokioCore["Tokio 异步运行时 / Reqwest Client / 端口 53319 / 复杂网络重绑"]:::daemon_node
-            UDSServer["Unix 块套接字 / @airsend-ipc 和 @airsend-app-ipc"]:::daemon_node
-            inotify -->|"捕获截图"| TokioCore
-            UDSServer <-->|"IPC 指令总线"| TokioCore
-        end
-
-        BootRcv -.->|"确认守护进程存活"| UDSServer
-        ForegroundSvc <-->|"GET-PEERS / 30s 轮询"| UDSServer
-        LSPosedHook -->|"SEND-TEXT 通过 @airsend-ipc"| UDSServer
-        UDSServer -->|"push-text-to-app 通过 @airsend-app-ipc"| GodMode
-    end
-
-    %% ==========================================
-    %% 第三部分：局域网双端跨越
-    %% ==========================================
-    UDP_Disc <===>|"UDP 发现 - LocalSend 协议兼容"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS/HTTP - 截图自动发送 - inotify 触发"| HTTP_Trans:::protocol_line
-    ClipSender ==>|"HTTPS/HTTP - clipboard.txt / PNG / 校园网兼容"| TokioCore:::protocol_line
-    TokioCore ==>|"HTTPS/HTTP - Android 剪贴板同步到 Mac NSPasteboard"| HTTP_Trans:::protocol_line
-    FileSender <==>|"HTTPS 默认 / HTTP 兼容 / 分块文件传输"| TokioCore:::protocol_line
-
-```
-
-<details>
-<summary>� 读图说明（点击展开）</summary>
-<br>
-
-- **黄色链路**：默认是 LocalSend 协议的 HTTPS 传输通道；开启兼容模式后会切到 plain HTTP，专门应对复杂校园网
-- **蓝色区域（macOS 端）**：纯 Swift 实现，默认走 `Network.framework` HTTPS 接收，同时提供可手动启用的 plain HTTP 兼容接收器
-- **UDPDiscoveryService**：除常规发现外，还负责大网段 `/24` 扩散探测和已知设备回找，解决校园网里“设备列表经常空白”的问题
-- **绿色区域（Android App 层）**：Kotlin 前台服务，每 30 秒轮询守护进程获取在线设备，更新 Direct Share 快捷方式
-- **紫色区域（Xposed 层）**：运行在 `system_server` 进程中，以 UID 1000 权限绕过 Android 10+ 的后台剪贴板访问限制，同时作为双向 IPC 总线的 Mac→Android 方向终点
-- **橙色区域（Rust Daemon）**：独立于 App 生命周期的 `arm64-v8a` 原生进程，通过两条 Unix 域套接字（`@airsend_ipc` 和 `@airsend_app_ipc`）分别与 Kotlin App 层和 Xposed 层通信，并负责复杂网络下的重绑恢复
-- **Campus fallback 边界**：兼容链路只作为复杂网络下的小 payload 兜底，不是通用大文件穿透方案
-
-</details>
+<p align="center">
+  <img src="docs/architecture/airsend-engineering-architecture.svg" alt="AirSend 底层工程架构图">
+</p>
 
 ---
 
@@ -249,7 +171,11 @@ flowchart TB
 
 ### 📌 运行方式
 
-AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动后默认开机自启（通过 `SMAppService` 实现，macOS 13+）。
+AirSend 完全运行在菜单栏，没有 Dock 图标，没有主窗口。启动后默认开机自启（通过 `SMAppService` 实现，macOS 15+）。
+
+### 🔄 自动更新
+
+Mac 端使用 Sparkle 自动检查并下载新版本。更新下载完成后，菜单栏里会出现 **Update ready, restart now?** 提示；点击提示或底部更新卡片即可重启并安装，无需再手动从 GitHub 下载替换。
 
 ### 📂 拖拽发送文件
 
@@ -321,9 +247,9 @@ Android 端分两种模式：
 
 ### 💻 Step 1：部署 Mac 端
 
-1. 前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 `AirSend.app`
-2. 拖入 `/Applications` 文件夹并打开
-3. 右键菜单栏的纸飞机图标 → **「开机时启动」** → 开启
+1. 首次安装时，前往 [Releases 页面](https://github.com/Avi7ii/AirSend/releases/latest) 下载最新的 macOS ZIP，将 `AirSend.app` 拖入 `/Applications` 后打开
+2. 已安装用户请使用 AirSend 内的 **Check for Updates** 升级；Sparkle 会安全退出旧进程、原子替换 App，并重新启动新版
+3. 建议在 **Settings → Startup & Updates** 中保持 **Auto-check for updates** 开启
 
 ### 🤖 Step 2：部署 Android 端
 
@@ -408,6 +334,16 @@ Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downl
 
 ---
 
+<h2 align="center">📈 Star History</h2>
+
+<p align="center">
+  <a href="https://star-history.com/#Avi7ii/AirSend&Date">
+    <img src="./docs/assets/airsend-star-history.svg" alt="AirSend Star History" width="100%">
+  </a>
+</p>
+
+---
+
 <h2 align="center">🤝 贡献与反馈 </h2>
 
 欢迎提交 Issue 反馈问题，或通过 PR 贡献代码。如果这个工具对你有帮助，点一个 🌟 是对项目最直接的支持。
@@ -416,4 +352,23 @@ Android 端照片保存在 `~/Pictures/AirSend`，其他文件保存在 `~/Downl
 
 <p align="center">
   <b>AirSend</b> - <i>Simple is the new smart. AirDrop, but for everyone.</i>
+</p>
+
+---
+
+<h2 align="center">☕ 请我喝杯咖啡</h2>
+
+<p align="center">
+  如果 AirSend 曾让 Mac 和 Android 之间少绕一点路，欢迎请我喝杯咖啡。<br>
+  金额不重要，你愿意使用它、记得它，就已经让我很开心了。
+</p>
+
+<p align="center">
+  <a href="SPONSOR.md">
+    <img src="docs/assets/sponsor/wechat-reward.png" width="280" alt="W.W 的微信赞赏码">
+  </a>
+</p>
+
+<p align="center">
+  <a href="SPONSOR.md"><b>❤️ 查看赞助页，了解这个小项目背后的故事</b></a>
 </p>

@@ -4,22 +4,71 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::Bytes;
+use axum::body::{to_bytes, Body as AxumBody};
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::StatusCode;
 use axum::Extension;
 use axum::{response::IntoResponse, Json};
+use futures_util::StreamExt;
+use reqwest::Body as ReqwestBody;
 
 use crate::error::{LocalSendError, Result};
 use crate::transfer::session::{Session, SessionStatus};
 use crate::{
     models::{device::DeviceInfo, file::FileMetadata},
-    remember_peer_entry, Client,
+    remember_peer_entry, Client, PeerMap,
 };
-use native_dialog::MessageDialog;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncomingAuthorization {
+    Accept,
+    Decline,
+}
+
+#[derive(Debug, Clone)]
+pub struct IncomingTransferOffer {
+    pub session_id: String,
+    pub sender: DeviceInfo,
+    pub files: HashMap<String, FileMetadata>,
+}
+
+#[async_trait::async_trait]
+pub trait IncomingTransferHandler: Send + Sync {
+    async fn authorize(
+        &self,
+        offer: IncomingTransferOffer,
+    ) -> std::result::Result<IncomingAuthorization, String>;
+
+    async fn staging_path(
+        &self,
+        session_id: &str,
+        file: &FileMetadata,
+    ) -> std::result::Result<PathBuf, String>;
+
+    async fn progress(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        transferred_bytes: u64,
+    ) -> std::result::Result<(), String>;
+
+    async fn completed(
+        &self,
+        session_id: &str,
+        file: &FileMetadata,
+        staged_path: PathBuf,
+    ) -> std::result::Result<bool, String>;
+
+    async fn failed(&self, session_id: &str, file_id: &str, message: &str);
+
+    async fn cancelled(&self, session_id: &str);
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,17 +95,17 @@ impl Client {
         }
 
         let peer = self.peers.lock().await.get(&peer).unwrap().clone();
-        println!("Peer: {:?}", peer);
+        tracing::debug!("Peer: {:?}", peer);
 
         let response = self
             .http_client
-            .post(&format!(
+            .post(format!(
                 "{}://{}/api/localsend/v2/prepare-upload",
                 peer.1.protocol,
                 peer.0.clone()
             ))
             .header("Connection", "close")
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(120))
             .json(&PrepareUploadRequest {
                 info: self.device.clone(),
                 files: files.clone(),
@@ -64,7 +113,7 @@ impl Client {
             .send()
             .await?;
 
-        println!("Response: {:?}", response);
+        tracing::debug!("Response: {:?}", response);
 
         let response: PrepareUploadResponse = response.json().await?;
 
@@ -91,35 +140,46 @@ impl Client {
         session_id: String,
         file_id: String,
         token: String,
-        body: Bytes,
+        body: ReqwestBody,
     ) -> Result<()> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions.get(&session_id).unwrap();
+        let (receiver_protocol, addr, file_size) = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions.get(&session_id).unwrap();
 
-        if session.status != SessionStatus::Active {
-            return Err(LocalSendError::SessionInactive);
-        }
+            if session.status != SessionStatus::Active {
+                return Err(LocalSendError::SessionInactive);
+            }
 
-        if session.file_tokens.get(&file_id) != Some(&token) {
-            return Err(LocalSendError::InvalidToken);
-        }
+            if session.file_tokens.get(&file_id) != Some(&token) {
+                return Err(LocalSendError::InvalidToken);
+            }
+
+            let file_size = session
+                .files
+                .get(&file_id)
+                .ok_or(LocalSendError::InvalidToken)?
+                .size;
+
+            (session.receiver.protocol.clone(), session.addr, file_size)
+        };
 
         let request = self
             .http_client
-            .post(&format!(
+            .post(format!(
                 "{}://{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
-                session.receiver.protocol, session.addr, session_id, file_id, token
+                receiver_protocol, addr, session_id, file_id, token
             ))
             .header("Connection", "close")
+            .header("Content-Length", file_size)
             .timeout(Duration::from_secs(180))
             //.post(&format!("https://webhook.site/2f23a529-b687-4375-ad5f-54906ab26ac7?session_id={}&file_id={}&token={}", session_id, file_id, token))
             .body(body);
 
-        println!("Uploading file: {:?}", request);
+        tracing::debug!("Uploading file: {:?}", request);
         let response = request.send().await?;
 
         if response.status() != 200 {
-            println!("Upload failed: {:?}", response);
+            tracing::warn!("Upload failed: {:?}", response);
             return Err(LocalSendError::UploadFailed);
         }
 
@@ -143,16 +203,16 @@ impl Client {
             .get(&file_metadata.id)
             .ok_or(LocalSendError::InvalidToken)?;
 
-        // Read file contents
-        let file_contents = tokio::fs::read(&file_path).await?;
-        let bytes = Bytes::from(file_contents);
+        // Stream file contents instead of loading the whole file into memory.
+        let file = tokio::fs::File::open(&file_path).await?;
+        let body = ReqwestBody::from(file);
 
         // Upload file
         self.upload(
             prepare_response.session_id,
             file_metadata.id,
             token.clone(),
-            bytes,
+            body,
         )
         .await?;
 
@@ -160,14 +220,19 @@ impl Client {
     }
 
     pub async fn cancel_upload(&self, session_id: String) -> Result<()> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions.get(&session_id).unwrap();
+        let (protocol, addr) = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions
+                .get(&session_id)
+                .ok_or(LocalSendError::SessionInactive)?;
+            (session.receiver.protocol.clone(), session.addr)
+        };
 
         let request = self
             .http_client
-            .post(&format!(
+            .post(format!(
                 "{}://{}/api/localsend/v2/cancel?sessionId={}",
-                session.receiver.protocol, session.addr, session_id
+                protocol, addr, session_id
             ))
             .header("Connection", "close")
             .timeout(Duration::from_secs(10))
@@ -183,13 +248,14 @@ impl Client {
 }
 
 pub async fn register_prepare_upload(
-    State(peers): State<Arc<Mutex<HashMap<String, (SocketAddr, DeviceInfo)>>>>,
+    State(peers): State<PeerMap>,
     Extension(client): Extension<DeviceInfo>,
     Extension(sessions): Extension<Arc<Mutex<HashMap<String, Session>>>>,
+    Extension(incoming_handler): Extension<Option<Arc<dyn IncomingTransferHandler>>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<PrepareUploadRequest>,
 ) -> impl IntoResponse {
-    println!("Received upload request from alias: {}", req.info.alias);
+    tracing::info!("Received upload request from alias: {}", req.info.alias);
 
     let mut sender_addr = addr;
     sender_addr.set_port(req.info.port);
@@ -198,40 +264,50 @@ pub async fn register_prepare_upload(
         remember_peer_entry(&mut peers, sender_addr, req.info.clone());
     }
 
-    // 🚀 修复点：对于守护进程模式，直接自动同意接收，无需弹窗
-    let result = true;
-
-    if result {
-        let session_id = Uuid::new_v4().to_string();
-
-        let file_tokens: HashMap<String, String> = req
-            .files
-            .iter()
-            .map(|(id, _)| (id.clone(), Uuid::new_v4().to_string())) // Replace with actual token logic
-            .collect();
-
-        let session = Session {
-            session_id: session_id.clone(),
-            files: req.files.clone(),
-            file_tokens: file_tokens.clone(),
-            receiver: client.clone(),
-            sender: req.info.clone(),
-            status: SessionStatus::Active,
-            addr,
-        };
-
-        sessions.lock().await.insert(session_id.clone(), session);
-
-        return (
-            StatusCode::OK,
-            Json(PrepareUploadResponse {
-                session_id,
-                files: file_tokens,
-            }),
-        )
-            .into_response();
+    let session_id = Uuid::new_v4().to_string();
+    let authorization = if let Some(handler) = incoming_handler {
+        handler
+            .authorize(IncomingTransferOffer {
+                session_id: session_id.clone(),
+                sender: req.info.clone(),
+                files: req.files.clone(),
+            })
+            .await
     } else {
-        return StatusCode::FORBIDDEN.into_response();
+        Ok(IncomingAuthorization::Accept)
+    };
+
+    match authorization {
+        Ok(IncomingAuthorization::Accept) => {
+            let file_tokens: HashMap<String, String> = req
+                .files
+                .keys()
+                .map(|id| (id.clone(), Uuid::new_v4().to_string())) // Replace with actual token logic
+                .collect();
+
+            let session = Session {
+                session_id: session_id.clone(),
+                files: req.files.clone(),
+                file_tokens: file_tokens.clone(),
+                receiver: client.clone(),
+                sender: req.info.clone(),
+                status: SessionStatus::Active,
+                addr,
+            };
+
+            sessions.lock().await.insert(session_id.clone(), session);
+
+            (
+                StatusCode::OK,
+                Json(PrepareUploadResponse {
+                    session_id,
+                    files: file_tokens,
+                }),
+            )
+                .into_response()
+        }
+        Ok(IncomingAuthorization::Decline) => StatusCode::FORBIDDEN.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     }
 }
 
@@ -239,54 +315,78 @@ pub async fn register_upload(
     Query(params): Query<UploadParams>,
     Extension(sessions): Extension<Arc<Mutex<HashMap<String, Session>>>>,
     Extension(download_dir): Extension<String>,
-    body: Bytes,
+    Extension(incoming_handler): Extension<Option<Arc<dyn IncomingTransferHandler>>>,
+    body: AxumBody,
 ) -> impl IntoResponse {
     // Extract query parameters
     let session_id = &params.session_id;
     let file_id = &params.file_id;
     let token = &params.token;
 
-    println!(
-        "📥 [register_upload] Received body: {} bytes, fileId: {}, sessionId: {}",
-        body.len(),
+    tracing::info!(
+        "📥 [register_upload] Receiving body stream, fileId: {}, sessionId: {}",
         file_id,
         session_id
     );
 
-    // Get session and validate
-    let mut sessions_lock = sessions.lock().await;
-    let session = match sessions_lock.get_mut(session_id) {
-        Some(session) => session,
-        None => return StatusCode::BAD_REQUEST.into_response(),
-    };
+    // Validate the session while holding the lock, then stream outside it.
+    let file_metadata = {
+        let sessions_lock = sessions.lock().await;
+        let session = match sessions_lock.get(session_id) {
+            Some(session) => session,
+            None => return StatusCode::BAD_REQUEST.into_response(),
+        };
 
-    if session.status != SessionStatus::Active {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
+        if session.status != SessionStatus::Active {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
 
-    // Validate token
-    if session.file_tokens.get(file_id) != Some(&token.to_string()) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
+        if session.file_tokens.get(file_id) != Some(token) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
 
-    // Get file metadata
-    let file_metadata = match session.files.get(file_id) {
-        Some(metadata) => metadata,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "File not found".to_string(),
-            )
-                .into_response()
+        match session.files.get(file_id) {
+            Some(metadata) => metadata.clone(),
+            None => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "File not found".to_string(),
+                )
+                    .into_response()
+            }
         }
     };
+
+    if let Some(handler) = incoming_handler {
+        return register_managed_upload(
+            handler,
+            sessions,
+            session_id,
+            file_id,
+            file_metadata,
+            body,
+        )
+        .await;
+    }
 
     // ==========================================
     // 🚀 核心拦截逻辑：发现是纯文本，直接截胡并推给 App
     // ==========================================
-    if file_metadata.file_type == "text/plain" {
+    if file_metadata.file_type == "text/plain"
+        && file_metadata.size <= MAX_CLIPBOARD_TEXT_BYTES as u64
+    {
+        let body = match to_bytes(body, MAX_CLIPBOARD_TEXT_BYTES).await {
+            Ok(body) => body,
+            Err(e) => {
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    format!("Failed to read text payload: {}", e),
+                )
+                    .into_response()
+            }
+        };
         let text_content = String::from_utf8_lossy(&body).to_string();
-        println!("📥 拦截到纯文本/剪贴板数据，长度: {}", text_content.len());
+        tracing::info!("📥 拦截到纯文本/剪贴板数据，长度: {}", text_content.len());
 
         // 异步推给 Android App 的 LocalServerSocket
         tokio::spawn(async move {
@@ -296,9 +396,9 @@ pub async fn register_upload(
                 Ok(mut stream) => {
                     let _ = stream.write_all(text_content.as_bytes()).await;
                     let _ = stream.shutdown().await;
-                    println!("✅ 成功将文本推送到 Android App IPC 总线");
+                    tracing::info!("✅ 成功将文本推送到 Android App IPC 总线");
                 }
-                Err(e) => println!(
+                Err(e) => tracing::warn!(
                     "❌ 无法连接到 App IPC (请确保App在前台运行且已启动 Reverse IPC): {}",
                     e
                 ),
@@ -361,14 +461,52 @@ pub async fn register_upload(
     }
     // ==========================================
 
-    // Write file (此时的 file_path 一定是安全的、未被占用的绝对路径)
-    if let Err(e) = tokio::fs::write(&file_path, body.clone()).await {
+    // Stream file to disk without buffering the full body in memory.
+    let mut output_file = match tokio::fs::File::create(&file_path).await {
+        Ok(file) => file,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create file: {}", e),
+            )
+                .into_response()
+        }
+    };
+
+    let mut body_stream = body.into_data_stream();
+    let mut written_bytes: u64 = 0;
+    while let Some(chunk_result) = body_stream.next().await {
+        let chunk = match chunk_result {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&file_path).await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to read upload body: {}", e),
+                )
+                    .into_response();
+            }
+        };
+        written_bytes += chunk.len() as u64;
+        if let Err(e) = output_file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&file_path).await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to write file: {}", e),
+            )
+                .into_response();
+        }
+    }
+
+    if let Err(e) = output_file.flush().await {
+        let _ = tokio::fs::remove_file(&file_path).await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to write file: {}", e),
         )
             .into_response();
     }
+    tracing::info!("✅ Streamed {} bytes to {}", written_bytes, file_path);
 
     // ==========================================
     // 📷 触发 Android 媒体扫描器
@@ -377,7 +515,7 @@ pub async fn register_upload(
         || file_metadata.file_type.starts_with("video/")
     {
         let _ = std::process::Command::new("am")
-            .args(&[
+            .args([
                 "broadcast",
                 "-a",
                 "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
@@ -385,10 +523,132 @@ pub async fn register_upload(
                 &format!("file://{}", file_path),
             ])
             .spawn();
-        println!("📸 媒体已落盘至 {}，并触发系统相册刷新", file_path);
+        tracing::info!("📸 媒体已落盘至 {}，并触发系统相册刷新", file_path);
     }
 
     StatusCode::OK.into_response()
+}
+
+async fn register_managed_upload(
+    handler: Arc<dyn IncomingTransferHandler>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    session_id: &str,
+    file_id: &str,
+    file_metadata: FileMetadata,
+    body: AxumBody,
+) -> axum::response::Response {
+    let staged_path = match handler.staging_path(session_id, &file_metadata).await {
+        Ok(path) => path,
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    };
+    if let Some(parent) = staged_path.parent() {
+        if let Err(error) = tokio::fs::create_dir_all(parent).await {
+            handler
+                .failed(session_id, file_id, &error.to_string())
+                .await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create staging directory: {error}"),
+            )
+                .into_response();
+        }
+    }
+    let mut output = match tokio::fs::File::create(&staged_path).await {
+        Ok(file) => file,
+        Err(error) => {
+            handler
+                .failed(session_id, file_id, &error.to_string())
+                .await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create staging file: {error}"),
+            )
+                .into_response();
+        }
+    };
+
+    let mut stream = body.into_data_stream();
+    let mut written = 0u64;
+    while let Some(chunk) = stream.next().await {
+        let active = sessions
+            .lock()
+            .await
+            .get(session_id)
+            .is_some_and(|session| session.status == SessionStatus::Active);
+        if !active {
+            let _ = tokio::fs::remove_file(&staged_path).await;
+            handler.cancelled(session_id).await;
+            return StatusCode::CONFLICT.into_response();
+        }
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&staged_path).await;
+                handler
+                    .failed(session_id, file_id, &error.to_string())
+                    .await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to read upload body: {error}"),
+                )
+                    .into_response();
+            }
+        };
+        if let Err(error) = output.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&staged_path).await;
+            handler
+                .failed(session_id, file_id, &error.to_string())
+                .await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to write staging file: {error}"),
+            )
+                .into_response();
+        }
+        written = written.saturating_add(chunk.len() as u64);
+        if let Err(error) = handler.progress(session_id, file_id, written).await {
+            let _ = tokio::fs::remove_file(&staged_path).await;
+            handler.failed(session_id, file_id, &error).await;
+            return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
+        }
+    }
+    if written != file_metadata.size {
+        let message = format!(
+            "Upload size mismatch: expected {}, received {}",
+            file_metadata.size, written
+        );
+        let _ = tokio::fs::remove_file(&staged_path).await;
+        handler.failed(session_id, file_id, &message).await;
+        return (StatusCode::BAD_REQUEST, message).into_response();
+    }
+    if let Err(error) = output.flush().await {
+        let _ = tokio::fs::remove_file(&staged_path).await;
+        handler
+            .failed(session_id, file_id, &error.to_string())
+            .await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to flush staging file: {error}"),
+        )
+            .into_response();
+    }
+    drop(output);
+
+    match handler
+        .completed(session_id, &file_metadata, staged_path)
+        .await
+    {
+        Ok(session_completed) => {
+            if session_completed {
+                sessions.lock().await.remove(session_id);
+            }
+            StatusCode::OK.into_response()
+        }
+        Err(error) => {
+            handler.failed(session_id, file_id, &error).await;
+            (StatusCode::INTERNAL_SERVER_ERROR, error).into_response()
+        }
+    }
 }
 
 // Query parameters struct
@@ -403,6 +663,7 @@ pub struct UploadParams {
 pub async fn register_cancel(
     Query(params): Query<CancelParams>,
     Extension(sessions): Extension<Arc<Mutex<HashMap<String, Session>>>>,
+    Extension(incoming_handler): Extension<Option<Arc<dyn IncomingTransferHandler>>>,
 ) -> impl IntoResponse {
     let mut sessions_lock = sessions.lock().await;
     let session = match sessions_lock.get_mut(&params.session_id) {
@@ -410,6 +671,10 @@ pub async fn register_cancel(
         None => return StatusCode::BAD_REQUEST.into_response(),
     };
     session.status = SessionStatus::Cancelled;
+    drop(sessions_lock);
+    if let Some(handler) = incoming_handler {
+        handler.cancelled(&params.session_id).await;
+    }
     StatusCode::OK.into_response()
 }
 
