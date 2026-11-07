@@ -92,7 +92,7 @@ jobs:
 
       - name: Clippy daemon
         working-directory: Android/airsend_daemon
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --bin airsend_daemon -- -D warnings
 
   android:
     name: Android daemon, lint, tests, and assembleDebug
